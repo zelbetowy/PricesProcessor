@@ -1,0 +1,83 @@
+# Ignorowanie pliku config.ini
+PythonScripts/config/config.ini
+
+# IntelliJ IDEA specific
+.idea/
+*.iml
+*.iws
+
+# Logs
+logs
+*.log
+
+# Temporary files
+*.swp
+*.swo
+*.tmp
+
+# Compiled class files
+*.class
+
+# JAR files
+*.jar
+*.war
+*.ear
+
+# Coverage results
+*.em
+*.exec
+*.hprof
+*.test
+
+# Maven specific
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+
+# Gradle specific
+.gradle/
+build/
+
+# Project specific files
+bin/
+out/
+dist/
+tmp/
+
+# Package Files #
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# IDE specific
+.DS_Store
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+.python-version
+*.coverage
+.tox/
+*.pytest_cache/
+.env
+.venv
+.cache
+*.egg-info
+.tox/
+coverage.xml
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
