@@ -40,12 +40,12 @@ def get_login_info(config):
 
 def get_settings(config):
     try:
-        num_bars = config.getint('settings', 'num_bars')
-        decimal_places = config.getint('settings', 'decimal_places')
-        sleep_between_symbols = config.getfloat('settings', 'sleep_between_symbols')
-        sleep_between_cycles = config.getfloat('settings', 'sleep_between_cycles')
-        view = config.getboolean('settings', 'view')
-        time_adjustment_hours = config.getint('settings', 'time_adjustment_hours')
+
+        decimal_places = config.getint('settings process', 'decimal_places')
+        sleep_between_symbols = config.getfloat('settings process', 'sleep_between_symbols')
+        sleep_between_cycles = config.getfloat('settings process', 'sleep_between_cycles')
+        view = config.getboolean('settings process', 'view')
+        time_adjustment_hours = config.getint('settings process', 'time_adjustment_hours')
     except configparser.NoSectionError as e:
         logger.error(f"Config file is missing section: {e.section}")
         raise
@@ -53,7 +53,7 @@ def get_settings(config):
         logger.error(f"Config file is missing option: {e.option}")
         raise
     logger.info("Settings loaded successfully")
-    return num_bars, decimal_places, sleep_between_symbols, sleep_between_cycles, view, time_adjustment_hours
+    return decimal_places, sleep_between_symbols, sleep_between_cycles, view, time_adjustment_hours
 
 def load_symbols():
     if not os.path.exists(SYMBOLS_FILE_PATH):
@@ -195,7 +195,7 @@ def main():
     logger.info("Rozpoczynanie działania skryptu Process Symbols")
     config = load_config()
     account, password, server = get_login_info(config)
-    num_bars, decimal_places, sleep_between_symbols, sleep_between_cycles, view, time_adjustment_hours = get_settings(config)
+    decimal_places, sleep_between_symbols, sleep_between_cycles, view, time_adjustment_hours = get_settings(config)
     symbols = load_symbols()
 
     initialize_mt5(account, password, server)
