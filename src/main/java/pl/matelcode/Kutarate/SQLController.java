@@ -44,6 +44,35 @@ public class SQLController {
         }
     }
 
+    @GetMapping("/clearForexDataTables")
+    public String clearForexDataTables() {
+        try {
+            List<String> tables = jdbcTemplate.queryForList("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'FOREX_DATA'", String.class);
+            for (String table : tables) {
+                jdbcTemplate.execute("DROP TABLE IF EXISTS FOREX_DATA." + table);
+            }
+            return "All tables in FOREX_DATA cleared successfully.";
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "Failed to clear tables in FOREX_DATA: " + e.getMessage();
+        }
+    }
+
+
+    @GetMapping("/clearForexProcessDataTables")
+    public String clearForexProcessDataTables() {
+        try {
+            List<String> tables = jdbcTemplate.queryForList("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'FOREX_PROCESSDATA'", String.class);
+            for (String table : tables) {
+                jdbcTemplate.execute("DROP TABLE IF EXISTS FOREX_PROCESSDATA." + table);
+            }
+            return "All tables in FOREX_PROCESSDATA cleared successfully.";
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "Failed to clear tables in FOREX_PROCESSDATA: " + e.getMessage();
+        }
+    }
+
     @PostMapping("/insertData")
     public String insertData(@RequestBody List<Map<String, Object>> data) {
         if (data.isEmpty()) {
@@ -95,3 +124,4 @@ public class SQLController {
         }
     }
 }
+

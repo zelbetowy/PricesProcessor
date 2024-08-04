@@ -3,6 +3,7 @@ import requests
 import os
 from datetime import datetime, timedelta
 import logging
+import configparser
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import PolynomialFeatures
@@ -13,14 +14,27 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger()
 
 # Ścieżki do plików
+CONFIG_FILE_PATH = 'D:/#SOFT/JAVA/Kutarate/Kutarate/PythonScripts/config/config.ini'
 SYMBOLS_FILE_PATH = 'D:/#SOFT/JAVA/Kutarate/Kutarate/PythonScripts/config/symbols.txt'
 
-# Zmienne na początku programu
-DEGREE = 4
-NUM_BARS = 10
-EXTRAPOLATED_TIMESTAMP = 5  # Example value: 5 seconds
-SLEEP_BETWEEN_SYMBOLS = 1
-SLEEP_BETWEEN_CYCLES = 1
+def load_config():
+    config = configparser.ConfigParser()
+    logger.info(f"Loading config file from: {CONFIG_FILE_PATH}")
+    if not os.path.exists(CONFIG_FILE_PATH):
+        logger.error(f"Config file not found at: {CONFIG_FILE_PATH}")
+        raise FileNotFoundError(f"Config file not found at: {CONFIG_FILE_PATH}")
+    config.read(CONFIG_FILE_PATH)
+    logger.info(f"Config file loaded successfully from: {CONFIG_FILE_PATH}")
+    return config
+
+# Pobieranie zmiennych z sekcji settings ExtrapolateSymbols
+config = load_config()
+DEGREE = config.getint('settings ExtrapolateSymbols', 'degree')
+NUM_BARS = config.getint('settings ExtrapolateSymbols', 'num_bars')
+EXTRAPOLATED_TIMESTAMP = config.getint('settings ExtrapolateSymbols', 'extrapolated_timestamp')
+SLEEP_BETWEEN_SYMBOLS = config.getint('settings ExtrapolateSymbols', 'sleep_between_symbols')
+SLEEP_BETWEEN_CYCLES = config.getint('settings ExtrapolateSymbols', 'sleep_between_cycles')
+view = config.getboolean('settings ExtrapolateSymbols', 'view')
 
 def load_symbols():
     if not os.path.exists(SYMBOLS_FILE_PATH):
@@ -35,21 +49,23 @@ def load_symbols():
 
 def send_data_to_server(url, data):
     try:
-        response = requests.post(url, json=data)
+        response = requests.post(url, json=data, timeout=2)  # Ustawienie timeout na 2 sekundy
         response.raise_for_status()
+    except requests.Timeout:
+        logger.warning("Server did not respond within 2 seconds.")
     except requests.RequestException as e:
         logger.error(f"Error sending data to server: {e}")
-        raise
 
 def create_schema_if_not_exists():
     create_process_schema_sql = "CREATE SCHEMA IF NOT EXISTS FOREX_PROCESSDATA;"
     try:
-        response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=create_process_schema_sql)
+        response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=create_process_schema_sql, timeout=2)
         response.raise_for_status()
         logger.info(f"Process schema creation response: {response.text}")
+    except requests.Timeout:
+        logger.warning("Server did not respond within 2 seconds while creating schema.")
     except requests.RequestException as e:
         logger.error(f"Error creating schema: {e}")
-        raise
 
 def create_table_pricesprocessed_if_not_exists(symbol):
     create_table_sql = f"""
@@ -61,61 +77,80 @@ def create_table_pricesprocessed_if_not_exists(symbol):
     );
     """
     try:
-        response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=create_table_sql)
+        response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=create_table_sql, timeout=2)
         response.raise_for_status()
         logger.info(f"Create PRICESPROCESSED table response for {symbol}: {response.text}")
+    except requests.Timeout:
+        logger.warning("Server did not respond within 2 seconds while creating table.")
     except requests.RequestException as e:
         logger.error(f"Error creating table: {e}")
-        raise
 
 def fetch_last_n_bars(symbol, num_bars):
     fetch_sql = f"""
     SELECT TIMESTAMP, BID, ASK, LAST FROM FOREX_DATA.PRICES_{symbol} ORDER BY TIMESTAMP DESC LIMIT {num_bars};
     """
     try:
-        response = requests.post('http://localhost:8080/SqlApi/querySQL', data=fetch_sql)
+        response = requests.post('http://localhost:8080/SqlApi/querySQL', data=fetch_sql, timeout=2)
         response.raise_for_status()
         response_data = response.json()
         return response_data
+    except requests.Timeout:
+        logger.warning("Server did not respond within 2 seconds while fetching data.")
+        return None
     except requests.RequestException as e:
         logger.error(f"Error fetching data from server: {e}")
-        raise
-    except ValueError as e:
-        logger.error(f"Error parsing JSON response: {e}")
-        logger.error(f"Server response: {response.text}")
-        raise
+        return None
 
 def extrapolate_values(symbol, data, degree, extrapolated_timestamp):
-    if len(data) < degree:
+    if len(data) < NUM_BARS:
         logger.warning(f"Not enough data to fit the polynomial for {symbol}")
         return None
 
+    # Tworzenie DataFrame z danych
     df = pd.DataFrame(data)
-    df['timestamp'] = pd.to_datetime(df['TIMESTAMP']).dt.tz_localize(None)  # Ensure tz-naive datetime
+    df['timestamp'] = pd.to_datetime(df['TIMESTAMP']).dt.tz_localize(None)
     df['time_seconds'] = (df['timestamp'] - df['timestamp'].min()).dt.total_seconds()
 
+    # Wybieranie ostatnich num_bars kroków czasowych
+    last_bars = df.tail(NUM_BARS)
+
+    # Dopasowanie wielomianu o określonym stopniu do danych
     poly = PolynomialFeatures(degree=degree)
-    X_poly = poly.fit_transform(df['time_seconds'].values.reshape(-1, 1))
+    X_poly = poly.fit_transform(last_bars['time_seconds'].values.reshape(-1, 1))
     model = LinearRegression()
-    model.fit(X_poly, df['LAST'])
+    model.fit(X_poly, last_bars['LAST'])
 
-    latest_timestamp = df['timestamp'].max()
-    latest_seconds = (latest_timestamp - datetime.combine(latest_timestamp.date(), datetime.min.time())).total_seconds()
-    rounded_seconds = latest_seconds - (latest_seconds % extrapolated_timestamp)
-    base_time = datetime.combine(latest_timestamp.date(), datetime.min.time()) + timedelta(seconds=rounded_seconds)
+    # Określenie zakresu czasu
+    start_time = last_bars['timestamp'].min()
+    end_time = last_bars['timestamp'].max()
 
-    future_timestamps = [base_time - timedelta(seconds=i * extrapolated_timestamp) for i in range(5)]
-    future_seconds = [(ts - df['timestamp'].min()).total_seconds() for ts in future_timestamps]
-    future_X_poly = poly.transform(np.array(future_seconds).reshape(-1, 1))
-    future_values = model.predict(future_X_poly)
+    # Generowanie równych kroków czasowych w przeszłości
+    equal_intervals = pd.date_range(start=start_time, end=end_time, freq=f'{extrapolated_timestamp}s')
 
+    # Przekształcanie czasów na sekundy
+    equal_seconds = (equal_intervals - start_time).total_seconds().astype(int)
+
+    # Upewnienie się, że equal_seconds jest tablicą numpy
+    equal_seconds = np.array(equal_seconds).reshape(-1, 1)
+
+    # Przekształcanie na cechy wielomianowe
+    equal_X_poly = poly.transform(equal_seconds)
+
+    # Przewidywanie wartości dla równych kroków czasowych
+    predicted_values = model.predict(equal_X_poly)
+
+    # Tworzenie wynikowej listy słowników
     extrapolated_data = []
-    for ts, value in zip(future_timestamps, future_values):
-        extrapolated_data.append({
-            "symbol": symbol,
-            "timestamp": ts.strftime('%Y-%m-%d %H:%M:%S'),
-            "last": round(value, 3)
-        })
+    for ts, value in zip(equal_intervals, predicted_values):
+        if (ts.second % extrapolated_timestamp) == 0:
+            record = {
+                "symbol": symbol,
+                "timestamp": ts.strftime('%Y-%m-%d %H:%M:%S'),
+                "last": round(value, 3)
+            }
+            extrapolated_data.append(record)
+            logger.info(f"Extrapolated data: {record}")  # Wyświetlanie w konsoli
+
     return extrapolated_data
 
 def process_symbols(symbols, degree, num_bars, extrapolated_timestamp, sleep_between_symbols, sleep_between_cycles):
@@ -131,6 +166,8 @@ def process_symbols(symbols, degree, num_bars, extrapolated_timestamp, sleep_bet
                     extrapolated_data = extrapolate_values(symbol, data, degree, extrapolated_timestamp)
                     if extrapolated_data:
                         for record in extrapolated_data:
+                            # Wyświetlenie danych ekstrapolowanych przed wstawieniem do bazy danych
+                            logger.info(f"Attempting to insert extrapolated data: {record}")
                             insert_sql = f"""
                             INSERT INTO FOREX_PROCESSDATA.PRICESPROCESSED_{symbol} (TIMESTAMP, LAST)
                             SELECT '{record['timestamp']}', {record['last']}
@@ -139,9 +176,11 @@ def process_symbols(symbols, degree, num_bars, extrapolated_timestamp, sleep_bet
                             );
                             """
                             try:
-                                response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=insert_sql)
+                                response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=insert_sql, timeout=2)
                                 response.raise_for_status()
                                 logger.debug(f"Inserted data: {record}")
+                            except requests.Timeout:
+                                logger.warning(f"Server did not respond within 2 seconds while inserting data: {record}")
                             except requests.RequestException as e:
                                 logger.error(f"Error inserting data: {e}")
             except Exception as e:

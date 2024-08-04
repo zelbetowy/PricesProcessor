@@ -1,10 +1,14 @@
 import time
-import MetaTrader5 as mt5
 import requests
 import os
 from datetime import datetime, timedelta
 import configparser
 import logging
+import MetaTrader5 as mt5
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
 
 # Konfiguracja logowania
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -38,27 +42,24 @@ def get_login_info(config):
     logger.info("Login configuration loaded successfully")
     return account, password, server
 
-def get_settings(config):
+def get_fetch_historical_data_settings(config):
     try:
-        timeframe_str = config.get('settings', 'timeframe')
+        degree = config.getint('settings fetchHistoricalData', 'degree')
+        num_bars = config.getint('settings fetchHistoricalData', 'num_bars')
+        timeframe_str = config.get('settings fetchHistoricalData', 'timeframe')
         timeframe = getattr(mt5, timeframe_str, None)
         if timeframe is None:
             raise ValueError(f"Invalid timeframe: {timeframe_str}")
-
-        num_bars = config.getint('settings', 'num_bars')
-        decimal_places = config.getint('settings', 'decimal_places')
-        sleep_between_symbols = config.getfloat('settings', 'sleep_between_symbols')
-        sleep_between_cycles = config.getfloat('settings', 'sleep_between_cycles')
-        view = config.getboolean('settings', 'view')
-        time_adjustment_hours = config.getint('settings', 'time_adjustment_hours')
+        extrapolated_timestamp = config.getint('settings fetchHistoricalData', 'extrapolated_timestamp')
+        view = config.getboolean('settings fetchHistoricalData', 'view')
     except configparser.NoSectionError as e:
         logger.error(f"Config file is missing section: {e.section}")
         raise
     except configparser.NoOptionError as e:
         logger.error(f"Config file is missing option: {e.option}")
         raise
-    logger.info("Settings loaded successfully")
-    return timeframe, num_bars, decimal_places, sleep_between_symbols, sleep_between_cycles, view, time_adjustment_hours
+    logger.info("Settings loaded successfully from [settings fetchHistoricalData]")
+    return degree, num_bars, timeframe, extrapolated_timestamp, view
 
 def load_symbols():
     if not os.path.exists(SYMBOLS_FILE_PATH):
@@ -94,58 +95,131 @@ def send_data_to_server(url, data):
         logger.error(f"Error sending data to server: {e}")
         raise
 
-def create_table_if_not_exists(symbol):
+def create_schema_if_not_exists():
+    create_process_schema_sql = "CREATE SCHEMA IF NOT EXISTS FOREX_PROCESSDATA;"
+    try:
+        logger.debug(f"Executing SQL: {create_process_schema_sql}")
+        response = requests.post('http://localhost:8080/SqlApi/executeSQL', data={'sql': create_process_schema_sql})
+        response.raise_for_status()
+        logger.info(f"Process schema creation response: {response.text}")
+    except requests.RequestException as e:
+        logger.error(f"Error creating schema: {e}")
+        raise
+
+def create_table_pricesprocessed_if_not_exists(symbol):
     create_table_sql = f"""
-    CREATE TABLE IF NOT EXISTS FOREX_DATA.PRICES_{symbol} (
+    CREATE TABLE IF NOT EXISTS FOREX_PROCESSDATA.PRICESPROCESSED_{symbol} (
         ID IDENTITY PRIMARY KEY,
         TIMESTAMP TIMESTAMP,
-        BID DECIMAL(20, 10),
-        ASK DECIMAL(20, 10),
-        LAST DECIMAL(20, 10),
+        LAST DECIMAL(20, 3),
         CONSTRAINT UNIQUE_INDEX UNIQUE (TIMESTAMP)
     );
     """
     try:
-        response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=create_table_sql)
+        logger.debug(f"Executing SQL: {create_table_sql}")
+        response = requests.post('http://localhost:8080/SqlApi/executeSQL', data={'sql': create_table_sql})
         response.raise_for_status()
+        logger.info(f"Create PRICESPROCESSED table response for {symbol}: {response.text}")
     except requests.RequestException as e:
         logger.error(f"Error creating table: {e}")
         raise
 
-def fetch_historical_data(symbols, timeframe, num_bars, time_adjustment_hours):
-    for symbol in symbols:
-        logger.info(f"Fetching historical data for symbol: {symbol}")
-        create_table_if_not_exists(symbol)
-        try:
-            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, num_bars)
-            if rates is None:
-                logger.error(f"Failed to fetch historical data for symbol: {symbol}")
-                continue
+def fetch_historical_data(symbol, timeframe, num_bars, time_adjustment_hours, view):
+    logger.info(f"Fetching historical data for symbol: {symbol}")
+    try:
+        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, num_bars)
+        if rates is None:
+            logger.error(f"Failed to fetch historical data for symbol: {symbol}")
+            return None
 
-            logger.info(f"Fetched {len(rates)} historical data points for symbol: {symbol}")
-            data = []
-            for rate in rates:
-                timestamp = datetime.fromtimestamp(rate['time']) + timedelta(hours=time_adjustment_hours)
-                data.append({
-                    "timestamp": timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                    "bid": rate['open'],
-                    "ask": rate['close'],
-                    "last": (rate['open'] + rate['close']) / 2
-                })
-            send_data_to_server(f'http://localhost:8080/api/saveHistoricalData/{symbol}', {"data": data})
-        except Exception as e:
-            logger.error(f"Exception fetching historical data for symbol {symbol}: {e}")
-            time.sleep(2)  # Opóźnienie przed kontynuacją
+        logger.info(f"Fetched {len(rates)} historical data points for symbol: {symbol}")
+        data = []
+        for rate in rates:
+            timestamp = datetime.fromtimestamp(rate['time']) + timedelta(hours=time_adjustment_hours)
+            data.append({
+                "timestamp": timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                "bid": rate['open'],
+                "ask": rate['close'],
+                "last": (rate['open'] + rate['close']) / 2
+            })
+            if view:
+                logger.info(f"Symbol: {symbol}, Timestamp: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}, Bid: {rate['open']}, Ask: {rate['close']}, Last: {(rate['open'] + rate['close']) / 2}")
+        return data
+    except Exception as e:
+        logger.error(f"Exception fetching historical data for symbol {symbol}: {e}")
+        return None
+
+def extrapolate_values(symbol, data, degree, extrapolated_timestamp, view):
+    if len(data) < degree:
+        logger.warning(f"Not enough data to fit the polynomial for {symbol}")
+        return None
+
+    df = pd.DataFrame(data)
+    df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)  # Ensure tz-naive datetime
+    df['time_seconds'] = (df['timestamp'] - df['timestamp'].min()).dt.total_seconds()
+
+    poly = PolynomialFeatures(degree=degree)
+    X_poly = poly.fit_transform(df['time_seconds'].values.reshape(-1, 1))
+    model = LinearRegression()
+    model.fit(X_poly, df['last'])
+
+    latest_timestamp = df['timestamp'].max()
+    future_timestamps = []
+    future_values = []
+
+    for timestamp in df['timestamp']:
+        for i in range(0, 300, extrapolated_timestamp):  # 5 minut = 300 sekund
+            future_timestamp = timestamp + timedelta(seconds=i)
+            future_seconds = (future_timestamp - df['timestamp'].min()).total_seconds()
+            future_X_poly = poly.transform(np.array(future_seconds).reshape(-1, 1))
+            future_value = model.predict(future_X_poly)
+            future_timestamps.append(future_timestamp)
+            future_values.append(future_value[0])
+
+    extrapolated_data = []
+    for ts, value in zip(future_timestamps, future_values):
+        extrapolated_data.append({
+            "symbol": symbol,
+            "timestamp": ts.strftime('%Y-%m-%d %H:%M:%S'),
+            "last": round(value, 3)
+        })
+        if view:
+            logger.info(f"Symbol: {symbol}, Timestamp: {ts.strftime('%Y-%m-%d %H:%M:%S')}, Last: {round(value, 3)}")
+    return extrapolated_data
+
+def process_symbol(symbol, degree, num_bars, timeframe, extrapolated_timestamp, view):
+    create_table_pricesprocessed_if_not_exists(symbol)
+    data = fetch_historical_data(symbol, timeframe, num_bars, -3, view)
+    if data:
+        extrapolated_data = extrapolate_values(symbol, data, degree, extrapolated_timestamp, view)
+        if extrapolated_data:
+            # Batch insert for multiple records
+            values = ", ".join([f"('{record['timestamp']}', {record['last']})" for record in extrapolated_data])
+            insert_sql = f"""
+            INSERT INTO FOREX_PROCESSDATA.PRICESPROCESSED_{symbol} (TIMESTAMP, LAST)
+            VALUES {values}
+            ON DUPLICATE KEY UPDATE LAST=VALUES(LAST);
+            """
+            logger.debug(f"Generated SQL: {insert_sql}")
+            try:
+                response = requests.post('http://localhost:8080/SqlApi/executeSQL', data={'sql': insert_sql})
+                response.raise_for_status()
+                logger.debug(f"Inserted data for {symbol}")
+            except requests.RequestException as e:
+                logger.error(f"Error inserting data for {symbol}: {e}")
 
 def main():
-    logger.info("Rozpoczynanie działania skryptu Fetch Historical Data")
+    logger.info("Rozpoczynanie działania skryptu Fetch and Process Historical Data")
     config = load_config()
     account, password, server = get_login_info(config)
-    timeframe, num_bars, decimal_places, sleep_between_symbols, sleep_between_cycles, view, time_adjustment_hours = get_settings(config)
+    degree, num_bars, timeframe, extrapolated_timestamp, view = get_fetch_historical_data_settings(config)
     symbols = load_symbols()
 
     initialize_mt5(account, password, server)
-    fetch_historical_data(symbols, timeframe, num_bars, time_adjustment_hours)
+    create_schema_if_not_exists()
+
+    if symbols:
+        process_symbol(symbols[0], degree, num_bars, timeframe, extrapolated_timestamp, view)
 
     mt5.shutdown()  # Zakończenie połączenia z MetaTrader 5
 
