@@ -3,6 +3,7 @@ import requests
 import os
 from datetime import datetime, timedelta
 import logging
+import configparser
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import PolynomialFeatures
@@ -13,14 +14,34 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger()
 
 # Ścieżki do plików
+CONFIG_FILE_PATH = 'D:/#SOFT/JAVA/Kutarate/Kutarate/PythonScripts/config/config.ini'
 SYMBOLS_FILE_PATH = 'D:/#SOFT/JAVA/Kutarate/Kutarate/PythonScripts/config/symbols.txt'
 
+def load_config():
+    config = configparser.ConfigParser()
+    logger.info(f"Loading config file from: {CONFIG_FILE_PATH}")
+    if not os.path.exists(CONFIG_FILE_PATH):
+        logger.error(f"Config file not found at: {CONFIG_FILE_PATH}")
+        raise FileNotFoundError(f"Config file not found at: {CONFIG_FILE_PATH}")
+    config.read(CONFIG_FILE_PATH)
+    logger.info(f"Config file loaded successfully from: {CONFIG_FILE_PATH}")
+    return config
+
+# Pobieranie zmiennych z sekcji settings ExtrapolateSymbols
+config = load_config()
+degree = config.getint('settings ExtrapolateSymbols', 'degree')
+num_bars = config.getint('settings ExtrapolateSymbols', 'num_bars')
+extrapolated_timestamp = config.getint('settings ExtrapolateSymbols', 'extrapolated_timestamp')
+sleep_between_symbols = config.getint('settings ExtrapolateSymbols', 'sleep_between_symbols')
+sleep_between_cycles = config.getint('settings ExtrapolateSymbols', 'sleep_between_cycles')
+view = config.getboolean('settings ExtrapolateSymbols', 'view')
+
 # Zmienne na początku programu
-DEGREE = 4
-NUM_BARS = 10
-EXTRAPOLATED_TIMESTAMP = 5  # Example value: 5 seconds
-SLEEP_BETWEEN_SYMBOLS = 1
-SLEEP_BETWEEN_CYCLES = 1
+DEGREE = degree
+NUM_BARS = num_bars
+EXTRAPOLATED_TIMESTAMP = extrapolated_timestamp  # Example value: 5 seconds
+SLEEP_BETWEEN_SYMBOLS = sleep_between_symbols
+SLEEP_BETWEEN_CYCLES = sleep_between_cycles
 
 def load_symbols():
     if not os.path.exists(SYMBOLS_FILE_PATH):
