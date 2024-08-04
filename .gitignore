@@ -6,8 +6,11 @@ PythonScripts/config/config.ini
 *.iml
 *.iws
 
+# Compiled class files
+*.class
+
 # Logs
-logs
+logs/
 *.log
 
 # Temporary files
@@ -15,22 +18,13 @@ logs
 *.swo
 *.tmp
 
-# Compiled class files
-*.class
-
-# JAR files
-*.jar
-*.war
-*.ear
-
-# Coverage results
-*.em
-*.exec
-*.hprof
-*.test
+# Directories for build results
+target/
+out/
+dist/
+bin/
 
 # Maven specific
-target/
 pom.xml.tag
 pom.xml.releaseBackup
 pom.xml.versionsBackup
@@ -40,12 +34,6 @@ release.properties
 # Gradle specific
 .gradle/
 build/
-
-# Project specific files
-bin/
-out/
-dist/
-tmp/
 
 # Package Files #
 *.war
@@ -72,7 +60,6 @@ __pycache__/
 coverage.xml
 
 # Java
-*.class
 *.jar
 *.war
 *.ear
