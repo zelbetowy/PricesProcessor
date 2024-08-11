@@ -149,26 +149,39 @@ def fetch_Data(symbol, num_bars):
 
 def extrapolate_values(symbol, data, degree, extrapolated_timestamp, num_bars, view):
     if len(data) < num_bars:
-        logger.warning(f"Not enough data to fit the polynomial for {symbol}")
+        logger.warning(f"Nie ma wystarczającej ilości danych, aby dopasować wielomian dla {symbol}")
         return None
 
     # Tworzenie DataFrame z danych
     df = pd.DataFrame(data)
-    df['timestamp'] = pd.to_datetime(df['TIMESTAMP']).dt.tz_localize(None)
-    df['time_seconds'] = (df['timestamp'] - df['timestamp'].min()).dt.total_seconds()
+    df['TIMESTAMP'] = pd.to_datetime(df['TIMESTAMP']).dt.tz_localize(None)
+    df['TIME_SECONDS'] = (df['TIMESTAMP'] - df['TIMESTAMP'].min()).dt.total_seconds()
 
     # Wybieranie ostatnich num_bars kroków czasowych
     last_bars = df.tail(num_bars)
 
+    # Sprawdzanie, czy w kolumnie 'LAST' nie ma wartości NaN
+    if last_bars['LAST'].isna().any():
+        logger.warning(f"Brakujące wartości w kolumnie 'LAST' dla {symbol}")
+        return None
+
     # Dopasowanie wielomianu o określonym stopniu do danych
     poly = PolynomialFeatures(degree=degree)
-    X_poly = poly.fit_transform(last_bars['time_seconds'].values.reshape(-1, 1))
+
+    # Przekształcenie TIME_SECONDS do odpowiedniego kształtu
+    X_poly = poly.fit_transform(last_bars['TIME_SECONDS'].values.reshape(-1, 1))
+
     model = LinearRegression()
-    model.fit(X_poly, last_bars['LAST'])
+
+    try:
+        model.fit(X_poly, last_bars['LAST'])
+    except ValueError as e:
+        logger.error(f"Błąd podczas dopasowywania modelu dla {symbol}: {e}")
+        return None
 
     # Określenie zakresu czasu
-    start_time = last_bars['timestamp'].min()
-    end_time = last_bars['timestamp'].max()
+    start_time = last_bars['TIMESTAMP'].min()
+    end_time = last_bars['TIMESTAMP'].max()
 
     # Generowanie równych kroków czasowych w przeszłości
     equal_intervals = pd.date_range(start=start_time, end=end_time, freq=f'{extrapolated_timestamp}s')
@@ -186,7 +199,7 @@ def extrapolate_values(symbol, data, degree, extrapolated_timestamp, num_bars, v
     predicted_values = model.predict(equal_X_poly)
 
     # Tworzenie wynikowej listy słowników
-    extrapolated_data = []
+    extrapolated_output = []
     for ts, value in zip(equal_intervals, predicted_values):
         if (ts.second % extrapolated_timestamp) == 0:
             record = {
@@ -194,19 +207,21 @@ def extrapolate_values(symbol, data, degree, extrapolated_timestamp, num_bars, v
                 "TIMESTAMP": ts.strftime('%Y-%m-%d %H:%M:%S'),
                 "LAST": round(value, 3)
             }
-            extrapolated_data.append(record)
+            extrapolated_output.append(record)
             logger.info(f"Extrapolated data: {record}")  # Wyświetlanie w konsoli
-    return extrapolated_data
+    return extrapolated_output
 
 def process_symbols(symbols, degree, num_bars, extrapolated_timestamp, sleep_between_symbols, sleep_between_cycles, view):
-    timeout = 3
+    timeout = 6
 
     while True:
         for symbol in symbols:
             logger.info(f"Processing symbol: {symbol}")
             try:
                 data = fetch_Data(symbol, num_bars)
+                extrapolated_data = []
                 extrapolated_data = extrapolate_values(symbol, data, degree, extrapolated_timestamp, num_bars, view)
+
                 if extrapolated_data:
                     for record in extrapolated_data:
                             # Wyświetlenie danych ekstrapolowanych przed wstawieniem do bazy danych
