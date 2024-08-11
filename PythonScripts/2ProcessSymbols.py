@@ -1,3 +1,4 @@
+import threading
 import time
 import MetaTrader5 as mt5
 import requests
@@ -133,62 +134,77 @@ def create_thick_table_if_not_exists():
         logger.error(f"Error creating THICK table: {e}")
         raise
 
+class TimeoutException(Exception):
+    pass
+
 def process_symbols(symbols, time_adjustment_hours, decimal_places, sleep_between_symbols, sleep_between_cycles, view):
+    timeout=4
+
+    def process_symbol(symbol):
+        if not mt5.symbol_select(symbol, True):
+            logger.error(f"Failed to select symbol: {symbol}")
+            return
+
+        symbol_info = mt5.symbol_info_tick(symbol)
+        if symbol_info is None:
+            logger.error(f"{symbol} not found, cannot call symbol_info_tick()")
+            return
+
+        bid = round(symbol_info.bid, decimal_places)
+        ask = round(symbol_info.ask, decimal_places)
+        last = round((bid + ask) / 2, decimal_places)
+
+        server_time = datetime.fromtimestamp(symbol_info.time) + timedelta(hours=time_adjustment_hours)
+        data = {
+            "SYMBOL": symbol,
+            "TIMESTAMP": server_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "BID": bid,
+            "ASK": ask,
+            "LAST": last
+        }
+
+        if view:
+            logger.info(f"SYMBOL: {symbol}, TIMESTAMP: {server_time.strftime('%Y-%m-%d %H:%M:%S')}, BID: {bid}, ASK: {ask}, LAST: {last}")
+
+        def post_data(merge_sql):
+            try:
+                response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=merge_sql, timeout=timeout)
+                response.raise_for_status()
+            except requests.RequestException as e:
+                logger.error(f"Server time out: {e}")
+
+        # MERGE do PRICES
+        merge_sql_prices = f"""
+        MERGE INTO FOREX_DATA.PRICES_{symbol} (TIMESTAMP, BID, ASK, LAST)
+        KEY(TIMESTAMP)
+        VALUES (PARSEDATETIME('{data['TIMESTAMP']}', 'yyyy-MM-dd HH:mm:ss'), {data['BID']}, {data['ASK']}, {data['LAST']});
+        """
+
+        # MERGE do THICK
+        merge_sql_thick = f"""
+        MERGE INTO FOREX_DATA.THICK (SYMBOL, TIMESTAMP, BID, ASK, LAST)
+        KEY(SYMBOL)
+        VALUES ('{data['SYMBOL']}', PARSEDATETIME('{data['TIMESTAMP']}', 'yyyy-MM-dd HH:mm:ss'), {data['BID']}, {data['ASK']}, {data['LAST']});
+        """
+
+        for merge_sql in [merge_sql_prices, merge_sql_thick]:
+            post_data(merge_sql)
+
     while True:
         for symbol in symbols:
-            if not mt5.symbol_select(symbol, True):
-                logger.error(f"Failed to select symbol: {symbol}")
-                continue
-
-            symbol_info = mt5.symbol_info_tick(symbol)
-            if symbol_info is None:
-                logger.error(f"{symbol} not found, cannot call symbol_info_tick()")
-                continue
-
-            bid = round(symbol_info.bid, decimal_places)
-            ask = round(symbol_info.ask, decimal_places)
-            last = round((bid + ask) / 2, decimal_places)
-
-            server_time = datetime.fromtimestamp(symbol_info.time) + timedelta(hours=time_adjustment_hours)
-            data = {
-                "symbol": symbol,
-                "timestamp": server_time.strftime('%Y-%m-%d %H:%M:%S'),
-                "bid": bid,
-                "ask": ask,
-                "last": last
-            }
-
-            if view:
-                logger.info(f"Symbol: {symbol}, Time: {server_time.strftime('%Y-%m-%d %H:%M:%S')}, Bid: {bid}, Ask: {ask}, Last: {last}")
-
-            # Wstawianie danych do bazy za pomocą MERGE do PRICES
-            merge_sql_prices = f"""
-            MERGE INTO FOREX_DATA.PRICES_{symbol} (TIMESTAMP, BID, ASK, LAST)
-            KEY(TIMESTAMP)
-            VALUES (PARSEDATETIME('{data['timestamp']}', 'yyyy-MM-dd HH:mm:ss'), {data['bid']}, {data['ask']}, {data['last']});
-            """
             try:
-                response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=merge_sql_prices, timeout=4)
-                response.raise_for_status()
-            except requests.RequestException as e:
-                logger.error(f"Server time out: {e}")
-                continue  # Przejście do następnego symbolu
+                thread = threading.Thread(target=process_symbol, args=(symbol,))
+                thread.start()
+                thread.join(timeout)
 
-            # Wstawianie danych do bazy za pomocą MERGE do THICK
-            merge_sql_thick = f"""
-            MERGE INTO FOREX_DATA.THICK (SYMBOL, TIMESTAMP, BID, ASK, LAST)
-            KEY(SYMBOL)
-            VALUES ('{data['symbol']}', PARSEDATETIME('{data['timestamp']}', 'yyyy-MM-dd HH:mm:ss'), {data['bid']}, {data['ask']}, {data['last']});
-            """
-            try:
-                response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=merge_sql_thick, timeout=4)
-                response.raise_for_status()
-            except requests.RequestException as e:
-                logger.error(f"Server time out: {e}")
-                continue  # Przejście do następnego symbolu
+                if thread.is_alive():
+                    raise TimeoutException(f"Processing symbol {symbol} timed out after {timeout} seconds")
+            except TimeoutException as e:
+                logger.error(str(e))
+            except Exception as e:
+                logger.error(f"Exception processing symbol {symbol}: {e}")
 
             time.sleep(sleep_between_symbols)  # Opóźnienie między każdym symbolem
-
         time.sleep(sleep_between_cycles)  # Opóźnienie po przetworzeniu wszystkich symboli
 
 def main():
