@@ -1,4 +1,3 @@
-import threading
 import time
 import MetaTrader5 as mt5
 import requests
@@ -41,7 +40,6 @@ def get_login_info(config):
 
 def get_settings(config):
     try:
-
         decimal_places = config.getint('settings process', 'decimal_places')
         sleep_between_symbols = config.getfloat('settings process', 'sleep_between_symbols')
         sleep_between_cycles = config.getfloat('settings process', 'sleep_between_cycles')
@@ -104,6 +102,7 @@ def create_table_prices_if_not_exists(symbol):
     CREATE TABLE IF NOT EXISTS FOREX_DATA.PRICES_{symbol} (
         ID IDENTITY PRIMARY KEY,
         TIMESTAMP TIMESTAMP,
+        SERVERTIME BIGINT,
         BID DECIMAL(20, 3),
         ASK DECIMAL(20, 3),
         LAST DECIMAL(20, 3),
@@ -122,6 +121,7 @@ def create_thick_table_if_not_exists():
     CREATE TABLE IF NOT EXISTS FOREX_DATA.THICK (
         SYMBOL VARCHAR(50) PRIMARY KEY,
         TIMESTAMP TIMESTAMP,
+        SERVERTIME BIGINT,
         BID DECIMAL(20, 3),
         ASK DECIMAL(20, 3),
         LAST DECIMAL(20, 3)
@@ -134,95 +134,68 @@ def create_thick_table_if_not_exists():
         logger.error(f"Error creating THICK table: {e}")
         raise
 
-class TimeoutException(Exception):
-    pass
-
 def process_symbols(symbols, time_adjustment_hours, decimal_places, sleep_between_symbols, sleep_between_cycles, view):
-    timeout = 4
-
-    def process_symbol(symbol):
-        try:
+    while True:
+        for symbol in symbols:
             if not mt5.symbol_select(symbol, True):
                 logger.error(f"Failed to select symbol: {symbol}")
-                return
+                continue
 
             symbol_info = mt5.symbol_info_tick(symbol)
             if symbol_info is None:
                 logger.error(f"{symbol} not found, cannot call symbol_info_tick()")
-                return
+                continue
 
             bid = round(symbol_info.bid, decimal_places)
             ask = round(symbol_info.ask, decimal_places)
             last = round((bid + ask) / 2, decimal_places)
 
-            server_time = datetime.fromtimestamp(symbol_info.time) + timedelta(hours=time_adjustment_hours)
+            # Pobranie serwera czasu i dostosowanie
+            server_time_raw = symbol_info.time
+            # print(server_time_raw)
+            server_time_with_adjustment = server_time_raw + (time_adjustment_hours * 3600)  # Dodanie przesunięcia w sekundach
+            # print(server_time_with_adjustment)
+
+            # Generowanie timestampu na podstawie już dostosowanego serwera czasu
+            server_time_adjusted = datetime.utcfromtimestamp(server_time_with_adjustment)
+
             data = {
-                "SYMBOL": symbol,
-                "TIMESTAMP": server_time.strftime('%Y-%m-%d %H:%M:%S'),
-                "BID": bid,
-                "ASK": ask,
-                "LAST": last
+                "symbol": symbol,
+                "timestamp": server_time_adjusted.strftime('%Y-%m-%d %H:%M:%S'),
+                "server_time_raw": int(server_time_with_adjustment),
+                "bid": bid,
+                "ask": ask,
+                "last": last
             }
 
             if view:
-                logger.info(f"SYMBOL: {symbol}, TIMESTAMP: {server_time.strftime('%Y-%m-%d %H:%M:%S')}, BID: {bid}, ASK: {ask}, LAST: {last}")
+                logger.info(f"Symbol: {symbol}, Time: {server_time_adjusted.strftime('%Y-%m-%d %H:%M:%S')}, Server Time Adjusted: {server_time_with_adjustment}, Bid: {bid}, Ask: {ask}, Last: {last}")
 
-            def post_data(sql):
-                try:
-                    response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=sql, timeout=timeout)
-                    response.raise_for_status()
-                except requests.RequestException as e:
-                    logger.error(f"Server time out: {e}")
-
-            # Najpierw próbujemy zaktualizować istniejący rekord
-            update_sql_prices = f"""
-            UPDATE FOREX_DATA.PRICES_{symbol} 
-            SET BID = {data['BID']}, ASK = {data['ASK']}, LAST = {data['LAST']}
-            WHERE TIMESTAMP = PARSEDATETIME('{data['TIMESTAMP']}', 'yyyy-MM-dd HH:mm:ss');
+            # Wstawianie danych do tabeli PRICES
+            merge_sql_prices = f"""
+            MERGE INTO FOREX_DATA.PRICES_{symbol} (TIMESTAMP, SERVERTIME, BID, ASK, LAST)
+            KEY(TIMESTAMP)
+            VALUES (PARSEDATETIME('{data['timestamp']}', 'yyyy-MM-dd HH:mm:ss'), {data['server_time_raw']}, {data['bid']}, {data['ask']}, {data['last']});
             """
-
-            update_sql_thick = f"""
-            UPDATE FOREX_DATA.THICK 
-            SET TIMESTAMP = PARSEDATETIME('{data['TIMESTAMP']}', 'yyyy-MM-dd HH:mm:ss'), BID = {data['BID']}, ASK = {data['ASK']}, LAST = {data['LAST']}
-            WHERE SYMBOL = '{data['SYMBOL']}';
-            """
-
-            # Następnie wstawiamy nowy rekord, jeśli aktualizacja nie wpłynęła na żadne wiersze
-            insert_sql_prices = f"""
-            INSERT INTO FOREX_DATA.PRICES_{symbol} (TIMESTAMP, BID, ASK, LAST)
-            SELECT PARSEDATETIME('{data['TIMESTAMP']}', 'yyyy-MM-dd HH:mm:ss'), {data['BID']}, {data['ASK']}, {data['LAST']}
-            WHERE NOT EXISTS (SELECT 1 FROM FOREX_DATA.PRICES_{symbol} WHERE TIMESTAMP = PARSEDATETIME('{data['TIMESTAMP']}', 'yyyy-MM-dd HH:mm:ss'));
-            """
-
-            insert_sql_thick = f"""
-            INSERT INTO FOREX_DATA.THICK (SYMBOL, TIMESTAMP, BID, ASK, LAST)
-            SELECT '{data['SYMBOL']}', PARSEDATETIME('{data['TIMESTAMP']}', 'yyyy-MM-dd HH:mm:ss'), {data['BID']}, {data['ASK']}, {data['LAST']}
-            WHERE NOT EXISTS (SELECT 1 FROM FOREX_DATA.THICK WHERE SYMBOL = '{data['SYMBOL']}');
-            """
-
-            # Wykonujemy najpierw update, potem insert
-            for sql in [update_sql_prices, insert_sql_prices, update_sql_thick, insert_sql_thick]:
-                post_data(sql)
-
-            logger.info(f"Successfully processed symbol {symbol}")
-
-        except Exception as e:
-            logger.error(f"Exception while processing symbol {symbol}: {e}")
-
-    while True:
-        for symbol in symbols:
             try:
-                thread = threading.Thread(target=process_symbol, args=(symbol,))
-                thread.start()
-                thread.join(timeout)
+                response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=merge_sql_prices, timeout=4)
+                response.raise_for_status()
+            except requests.RequestException as e:
+                logger.error(f"Server time out: {e}")
+                continue  # Przejście do następnego symbolu
 
-                if thread.is_alive():
-                    raise TimeoutException(f"Processing symbol {symbol} timed out after {timeout} seconds")
-
-            except TimeoutException as e:
-                logger.error(str(e))
-            except Exception as e:
-                logger.error(f"Exception processing symbol {symbol}: {e}")
+            # Wstawianie danych do tabeli THICK
+            merge_sql_thick = f"""
+            MERGE INTO FOREX_DATA.THICK (SYMBOL, TIMESTAMP, SERVERTIME, BID, ASK, LAST)
+            KEY(SYMBOL)
+            VALUES ('{data['symbol']}', PARSEDATETIME('{data['timestamp']}', 'yyyy-MM-dd HH:mm:ss'), {data['server_time_raw']}, {data['bid']}, {data['ask']}, {data['last']});
+            """
+            try:
+                response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=merge_sql_thick, timeout=4)
+                response.raise_for_status()
+            except requests.RequestException as e:
+                logger.error(f"Server time out: {e}")
+                continue  # Przejście do następnego symbolu
 
             time.sleep(sleep_between_symbols)  # Opóźnienie między każdym symbolem
         time.sleep(sleep_between_cycles)  # Opóźnienie po przetworzeniu wszystkich symboli
