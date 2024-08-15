@@ -2,7 +2,7 @@ import time
 import MetaTrader5 as mt5
 import requests
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 import configparser
 import logging
 
@@ -98,15 +98,15 @@ def create_schema_if_not_exists():
         raise
 
 def create_table_prices_if_not_exists(symbol):
+    table_name = symbol.replace(".","")
     create_table_sql = f"""
-    CREATE TABLE IF NOT EXISTS FOREX_DATA.PRICES_{symbol} (
+    CREATE TABLE IF NOT EXISTS FOREX_DATA.PRICES_{table_name} (
         ID IDENTITY PRIMARY KEY,
         TIMESTAMP TIMESTAMP,
         SERVERTIME BIGINT,
         BID DECIMAL(20, 3),
         ASK DECIMAL(20, 3),
-        LAST DECIMAL(20, 3),
-        CONSTRAINT UNIQUE_INDEX UNIQUE (TIMESTAMP)
+        LAST DECIMAL(20, 3)
     );
     """
     try:
@@ -173,7 +173,7 @@ def process_symbols(symbols, time_adjustment_hours, decimal_places, sleep_betwee
 
             # Wstawianie danych do tabeli PRICES
             merge_sql_prices = f"""
-            MERGE INTO FOREX_DATA.PRICES_{symbol} (TIMESTAMP, SERVERTIME, BID, ASK, LAST)
+            MERGE INTO FOREX_DATA.PRICES_{(symbol.replace(".",""))} (TIMESTAMP, SERVERTIME, BID, ASK, LAST)
             KEY(TIMESTAMP)
             VALUES (PARSEDATETIME('{data['timestamp']}', 'yyyy-MM-dd HH:mm:ss'), {data['server_time_raw']}, {data['bid']}, {data['ask']}, {data['last']});
             """

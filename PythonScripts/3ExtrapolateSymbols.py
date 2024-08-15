@@ -109,8 +109,9 @@ def create_schema_if_not_exists():
         logger.error(f"Error creating schema: {e}")
 
 def create_table_pricesprocessed_if_not_exists(symbol):
+    table_name = symbol.replace(".","")
     create_table_sql = f"""
-    CREATE TABLE IF NOT EXISTS FOREX_PROCESSDATA.PRICESPROCESSED_{symbol} (
+    CREATE TABLE IF NOT EXISTS FOREX_PROCESSDATA.PRICESPROCESSED_{table_name} (
         TIMESTAMP TIMESTAMP,
         SERVERTIME BIGINT PRIMARY KEY,
         LAST DECIMAL(20, 3)
@@ -129,6 +130,7 @@ def create_table_pricesprocessed_if_not_exists(symbol):
 def fetch_data(symbol, num_bars):
     logger.info(f"Fetching historical data for symbol: {symbol}")
     timeout = 2
+    symbol=symbol.replace(".","")
 
     try:
         # Tworzenie zapytania SQL do pobrania najnowszych danych
@@ -222,6 +224,7 @@ def process_symbols(symbols, degree, num_bars, extrapolated_timestamp, sleep_bet
                     for record in extrapolated_data:
                         if view:  # Only show this log if VIEW is True
                             logger.info(f"DATA: {record}")
+                            symbol.replace(".","")
                         insert_sql = f"""
                             MERGE INTO FOREX_PROCESSDATA.PRICESPROCESSED_{symbol} AS target
                             USING (SELECT'{record['TIMESTAMP']}' AS TIMESTAMP, {record['SERVERTIME']} AS SERVERTIME, {record['LAST']} AS LAST) AS source
