@@ -4,7 +4,9 @@ These processed data then will be output for an Excel sheet which allows flexibl
 
 as a technology I chose the Spring framework in Java. Python scripts are run in it - this is related to the API that is used in broker applications - MT5, MT4. 
 The main logic of data processing and saving data to the H2 database is created within the Python scripts. 
-From there, the values ​​will be transferred to Excel sheets, using Java technology.
+From there, the values ​​will be transferred to Excel sheets, using Java technology. Due to my poor knowledge of Python - the scripts are written using a chatbot, as regular scripts without using object orientation. 
+They work stably, but unfortunately a lot of things are repeated. Using static methods makes editing very time-consuming, in the future I would like to convert these scripts to object orientation,
+so that they use as many common things as possible, which will allow for easier improvements in the future. For now, it stays as it is.
 
 That will make possible to test any of idea of indicator, which exceeds the capabilities of common tools. 
 Using the RAM database is very light and efficient. Historical results do not have to be saved, because the saving process can be preceded by a script, peaking any number of historical entries for a given symbol. 
