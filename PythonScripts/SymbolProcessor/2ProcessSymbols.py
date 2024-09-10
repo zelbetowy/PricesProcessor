@@ -11,8 +11,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger()
 
 # Ścieżki do plików
-CONFIG_FILE_PATH = 'D:/#SOFT/JAVA/Kutarate/Kutarate/PythonScripts/config/config.ini'
-SYMBOLS_FILE_PATH = 'D:/#SOFT/JAVA/Kutarate/Kutarate/PythonScripts/config/symbols.txt'
+CONFIG_FILE_PATH = '/PythonScripts/config/config.ini'
+SYMBOLS_FILE_PATH = '/PythonScripts/config/symbols.txt'
 
 def load_config():
     config = configparser.ConfigParser()

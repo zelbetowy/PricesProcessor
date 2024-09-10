@@ -1,22 +1,23 @@
 import time
+import threading
 import requests
 import os
+from datetime import datetime, timedelta, time
+import configparser
 import logging
 import MetaTrader5 as mt5
-import configparser
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
-from datetime import datetime
 
 # Konfiguracja logowania
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 
 # Ścieżki do plików
-CONFIG_FILE_PATH = 'D:/#SOFT/JAVA/Kutarate/Kutarate/PythonScripts/config/config.ini'
-SYMBOLS_FILE_PATH = 'D:/#SOFT/JAVA/Kutarate/Kutarate/PythonScripts/config/symbols.txt'
+CONFIG_FILE_PATH = '/PythonScripts/config/config.ini'
+SYMBOLS_FILE_PATH = '/PythonScripts/config/symbols.txt'
 
 def load_config():
     config = configparser.ConfigParser()
@@ -44,21 +45,24 @@ def get_login_info(config):
 
 def get_settings(config):
     try:
-        DEGREE = config.getint('settings ExtrapolateSymbols', 'degree')
-        NUM_BARS = config.getint('settings ExtrapolateSymbols', 'num_bars')
-        EXTRAPOLATED_TIMESTAMP = config.getint('settings ExtrapolateSymbols', 'extrapolated_timestamp')
-        SLEEP_BETWEEN_SYMBOLS = config.getfloat('settings ExtrapolateSymbols', 'sleep_between_symbols')
-        SLEEP_BETWEEN_CYCLES = config.getfloat('settings ExtrapolateSymbols', 'sleep_between_cycles')
-        VIEW = config.getboolean('settings ExtrapolateSymbols', 'view')
 
+
+
+        DEGREE = config.getint('settings fetchHistoricalData', 'degree')
+        NUM_BARS = config.getint('settings fetchHistoricalData', 'num_bars')
+        TIMEFRAME = config.get('settings fetchHistoricalData', 'timeframe')
+        EXTRAPOLATED_TIMESTAMP = config.getint('settings fetchHistoricalData', 'extrapolated_timestamp')
+        SLEEP_BETWEEN_SYMBOLS = config.getfloat('settings fetchHistoricalData', 'sleep_between_symbols')
+        TIME_ADJUSTMENT_HOURS = config.getfloat('settings fetchHistoricalData', 'time_adjustment_hours')
+        VIEW = config.getboolean('settings fetchHistoricalData', 'view')
     except configparser.NoSectionError as e:
         logger.error(f"Config file is missing section: {e.section}")
         raise
     except configparser.NoOptionError as e:
         logger.error(f"Config file is missing option: {e.option}")
         raise
-    logger.info("Settings loaded successfully from [settings ExtrapolateSymbols]")
-    return DEGREE, NUM_BARS, EXTRAPOLATED_TIMESTAMP, SLEEP_BETWEEN_SYMBOLS, SLEEP_BETWEEN_CYCLES, VIEW
+    logger.info("Settings loaded successfully from [settings fetchHistoricalData]")
+    return DEGREE, NUM_BARS, TIMEFRAME, EXTRAPOLATED_TIMESTAMP,SLEEP_BETWEEN_SYMBOLS,TIME_ADJUSTMENT_HOURS, VIEW
 
 def load_symbols():
     if not os.path.exists(SYMBOLS_FILE_PATH):
@@ -87,12 +91,12 @@ def initialize_mt5(account, password, server):
         raise
 
 def send_data_to_server(url, data):
-    timeout = 2
+    timeout=2
     try:
-        response = requests.post(url, json=data, timeout=timeout)
+        response = requests.post(url, json=data, timeout=timeout)  # Timeouty - wiadomo
         response.raise_for_status()
     except requests.Timeout:
-        logger.warning("Server did not respond in time. Timeout: " + str(timeout) + " s")
+        logger.warning("Server did not respond in time ." + " " + str(timeout) + " s")
     except requests.RequestException as e:
         logger.error(f"Error sending data to server: {e}")
 
@@ -109,15 +113,14 @@ def create_schema_if_not_exists():
         logger.error(f"Error creating schema: {e}")
 
 def create_table_pricesprocessed_if_not_exists(symbol):
-    table_name = symbol.replace(".","")
     create_table_sql = f"""
-    CREATE TABLE IF NOT EXISTS FOREX_PROCESSDATA.PRICESPROCESSED_{table_name} (
+    CREATE TABLE IF NOT EXISTS FOREX_PROCESSDATA.PRICESPROCESSED_{symbol.replace(".","")} (
         TIMESTAMP TIMESTAMP,
         SERVERTIME BIGINT PRIMARY KEY,
         LAST DECIMAL(20, 3)
     );
     """
-    timeout = 2
+    timeout=2
     try:
         response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=create_table_sql, timeout=timeout)
         response.raise_for_status()
@@ -127,32 +130,53 @@ def create_table_pricesprocessed_if_not_exists(symbol):
     except requests.RequestException as e:
         logger.error(f"Error creating table: {e}")
 
-def fetch_data(symbol, num_bars):
+class TimeoutException(Exception):   #Klasa z wyjątkiem dla timeouta, dla fetch_historical_data.
+    pass
+
+def fetch_historicalData(symbol, timeframe, num_bars, time_adjustment_hours, view):
     logger.info(f"Fetching historical data for symbol: {symbol}")
-    timeout = 2
-    symbol=symbol.replace(".","")
+    timeout = 4
+    resultData = []
 
-    try:
-        # Tworzenie zapytania SQL do pobrania najnowszych danych
-        fetch_sql = f"""
-        SELECT SERVERTIME, LAST FROM FOREX_DATA.PRICES_{symbol} ORDER BY SERVERTIME DESC LIMIT {num_bars}; """
-        response = requests.post('http://localhost:8080/SqlApi/querySQL', data=fetch_sql, timeout=timeout)
-        response.raise_for_status()
+    def target():
+        nonlocal resultData
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 0, num_bars)
+        if rates is None:
+            logger.error(f"Failed to fetch historical data for symbol: {symbol}")
+            resultData = None
+            return
+        logger.info(f"Fetched {len(rates)} historical data points for symbol: {symbol}")
+        response_data = []
 
-        response_data = response.json()
-        return response_data
+        for rate in rates:
+            timestamp = rate['time'] + int(time_adjustment_hours * 3600)  # Zachowanie czasu jako Unix timestamp
+            response_data.append({
+                "SERVERTIME": timestamp,
+                "LAST": round((rate['open'] + rate['close']) / 2, 3)
+            })
+            if view:
+                logger.info(f"SYMBOL: {symbol},"
+                            f" SERVERTIME: {timestamp},"
+                            f" BID: {rate['open']},"
+                            f" ASK: {rate['close']},"
+                            f" LAST: {(rate['open'] + rate['close']) / 2}")
 
-    except requests.Timeout:
-        logger.warning("Server did not respond within " + str(timeout) + " seconds while fetching data.")
-        return None
-    except requests.RequestException as e:
-        logger.error(f"Error fetching data from server: {e}")
-        return None
+        resultData = response_data
 
-def extrapolate_values(data, degree, extrapolated_timestamp, num_bars, view):
-    if len(data) < 2:  # Minimalna liczba punktów do dopasowania wielomianu
+    thread = threading.Thread(target=target)
+    thread.start()
+    thread.join(timeout)
+
+    if thread.is_alive():
+        raise TimeoutException(f"Fetching historical data for {symbol} timed out after {timeout} seconds")
+
+    return resultData
+
+def extrapolate_values(data, degree, extrapolated_timestamp, view):
+    if len(data) < 3:  # Minimalna liczba punktów do dopasowania wielomianu
         logger.warning("Nie ma wystarczającej ilości danych, aby dopasować wielomian")
         return None
+
 
     # Tworzenie DataFrame z danych
     df = pd.DataFrame(data)
@@ -206,64 +230,66 @@ def extrapolate_values(data, degree, extrapolated_timestamp, num_bars, view):
 
     return extrapolated_output
 
-def process_symbols(symbols, degree, num_bars, extrapolated_timestamp, sleep_between_symbols, sleep_between_cycles, view):
-    timeout = 6
+def process_symbol(symbols, degree, num_bars, timeframe, extrapolated_timestamp, sleep_between_symbols,time_adjustment_hours, view):
+    timeout = 3
 
-    while True:
-        for symbol in symbols:
-            logger.info(f"Processing symbol: {symbol}")
-            try:
-                data = fetch_data(symbol, num_bars)
-                if not data:
-                    logger.warning(f"Brak danych do przetworzenia dla symbolu: {symbol}")
-                    continue
+    for symbol in symbols:
+        logger.info(f"Processing symbol: {symbol}")
+        try:
+            data = fetch_historicalData(symbol, timeframe, num_bars, time_adjustment_hours, view)
+            # print('to!')
+            # print(data)
 
-                extrapolated_data = extrapolate_values(data, degree, extrapolated_timestamp, num_bars, view)
+            extrapolated_data = extrapolate_values(data, degree, extrapolated_timestamp, view)
+            # print('to!')
+            # print(extrapolated_data)
 
-                if extrapolated_data:
-                    for record in extrapolated_data:
-                        if view:  # Only show this log if VIEW is True
-                            logger.info(f"DATA: {record}")
-                            symbol.replace(".","")
-                        insert_sql = f"""
-                            MERGE INTO FOREX_PROCESSDATA.PRICESPROCESSED_{symbol} AS target
-                            USING (SELECT'{record['TIMESTAMP']}' AS TIMESTAMP, {record['SERVERTIME']} AS SERVERTIME, {record['LAST']} AS LAST) AS source
+            if extrapolated_data:
+                for record in extrapolated_data:
+                    if view:  # Only show this log if VIEW is True
+                        logger.info(f"DATA: {record}")
+
+
+                    insert_sql = f"""
+                            MERGE INTO FOREX_PROCESSDATA.PRICESPROCESSED_{symbol.replace(".", "")} AS target
+                            USING (
+                                SELECT
+                                 '{record['TIMESTAMP']}' AS TIMESTAMP, {record['SERVERTIME']} AS SERVERTIME, {record['LAST']} AS LAST) AS source
                             ON target.SERVERTIME = source.SERVERTIME
                             WHEN MATCHED THEN
                                 UPDATE SET TIMESTAMP = source.TIMESTAMP, LAST = source.LAST
                             WHEN NOT MATCHED THEN
                                 INSERT (TIMESTAMP, SERVERTIME, LAST) VALUES (source.TIMESTAMP, source.SERVERTIME, source.LAST);
-                            """
-                        try:
-                            response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=insert_sql, timeout=timeout)
-                            response.raise_for_status()
-                            if view:  # Only show this log if VIEW is True
-                                logger.debug(f"Inserted or updated data: {record}")
-                        except requests.Timeout:
-                            logger.warning(f"Server did not respond within {timeout} seconds while inserting data: {record}")
-                        except requests.RequestException as e:
-                            logger.error(f"Error inserting data: {e}")
-            except Exception as e:
-                logger.error(f"Exception processing symbol {symbol}: {e}")
-            time.sleep(sleep_between_symbols)
+                        """
 
-        logger.info("Sleeping between cycles")
-        time.sleep(sleep_between_cycles)
+                    try:
+                        response = requests.post('http://localhost:8080/SqlApi/executeSQL', data=insert_sql, timeout=timeout)
+                        response.raise_for_status()
+                        logger.debug(f"Succesfuly inserted data for {symbol}")
+                    except requests.Timeout:
+                        logger.warning(f"Server did not respond within {timeout} seconds while inserting data: {record}")
+                    except requests.RequestException as e:
+                        logger.error(f"Error inserting data for {symbol}: {e}")
+        except Exception as e:
+            logger.error(f"Exception processing symbol {symbol}: {e}")
+
 
 def main():
-    logger.info("Rozpoczynanie działania skryptu Process Symbols")
+    logger.info("Rozpoczynanie działania skryptu Fetch and Process Historical Data")
     config = load_config()
+    account, password, server = get_login_info(config)
+    initialize_mt5(account, password, server)
 
     create_schema_if_not_exists()
     symbols = load_symbols()
     for symbol in symbols:
         create_table_pricesprocessed_if_not_exists(symbol)
 
-    DEGREE, NUM_BARS, EXTRAPOLATED_TIMESTAMP, SLEEP_BETWEEN_SYMBOLS, SLEEP_BETWEEN_CYCLES, VIEW = get_settings(config)
-    try:
-        process_symbols(symbols, DEGREE, NUM_BARS, EXTRAPOLATED_TIMESTAMP, SLEEP_BETWEEN_SYMBOLS, SLEEP_BETWEEN_CYCLES, VIEW)
-    except KeyboardInterrupt:
-        logger.info("Process interrupted by user")
+    degree, num_bars, timeframe, extrapolated_timestamp, sleep_between_symbols, time_adjustment_hours, view = get_settings(config)
+    if symbols:
+        process_symbol(symbols, degree, num_bars, timeframe, extrapolated_timestamp, sleep_between_symbols,time_adjustment_hours, view)
+
+    mt5.shutdown()  # Zakończenie połączenia z MetaTrader 5
 
 if __name__ == "__main__":
     main()

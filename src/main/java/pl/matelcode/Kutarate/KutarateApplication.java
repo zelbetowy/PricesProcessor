@@ -8,7 +8,6 @@ public class KutarateApplication {
 
 	public static void main(String[] args) {
 		SpringApplication.run(KutarateApplication.class, args);
-		System.out.println("Ty huju");
 	}
 
 }
