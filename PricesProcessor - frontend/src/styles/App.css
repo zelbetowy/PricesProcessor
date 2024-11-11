@@ -1,0 +1,17 @@
+/* Styl dla strony g³ównej */
+
+
+body {
+    font-family: Arial, sans-serif; /* Set a default font family */
+    font-size: 20px;
+    margin: 0; /* Remove default margin */
+    padding: 0; /* Remove default padding */
+    background-color: #f0f0f0; /* Set a background color for the entire app */
+}
+
+/* App.css */
+main {
+    padding-top: 80px; /* Ustawia odsuniêcie od góry na sta³e */
+}
+
+
