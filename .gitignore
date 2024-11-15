@@ -1,10 +1,12 @@
-# Default ignored files
+# IntelliJ IDEA specific files
+.idea/
+workspace.xml
 /shelf/
-/workspace.xml
-\#save/
+#save/
 
-# Ignorowanie wypakowanych - Pythona Portable
-# Ignorowanie plików generowanych i tymczasowych
+# Ignoring extracted portable versions of Python and Java
 Portable Python-3.9.13 x64*/
 Zulu*/
+
+# Ignoring temporary and log files
 *.log
