@@ -7,19 +7,112 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Dependency directories
+node_modules/
+dist/
+dist-ssr/
+out/
+tmp/
+.temp/
+
+# Local environment files
 *.local
+.env
+.env.*.local
 
 # Editor directories and files
-.vs/*
-.vscode/*
+.vs/
+.vscode/
 !.vscode/extensions.json
-.idea
-.DS_Store
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+*.iml
+
+# OS generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Build directories for JavaScript/TypeScript
+build/
+.cache/
+.eslintcache
+.parcel-cache/
+.hugo_cache/
+.nuxt/
+.next/
+.svelte-kit/
+
+# Jest test results
+jest/
+coverage/
+coverage-final.json
+.nyc_output/
+
+# Optional npm files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# macOS folder attributes
+.AppleDouble
+.LSOverride
+
+# Windows image file caches
+Thumbs.db
+ehthumbs.db
+
+# Windows Installer files
+*.cab
+*.msi
+*.msm
+*.msp
+
+# Files that might appear in temporary directories
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency directories
+.pnp
+.pnp.js
+
+# Yarn Integrity file
+.yarn-integrity
+
+# Project-related local configurations
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Parcel cache
+.cache/
+.parcel-cache/
+
+# TypeScript
+*.tsbuildinfo
+
+# Binaries for npm package
+*.node
+
+# Puppeteer/Playwright development library
+.puppeteer/
+
+# SvelteKit
+.output/
+.svelte-kit/
+
+# Storybook files
+.out/
+storybook-static/
+
+# Cypress files
+.cypress/
+
+# VS Code workspace storage
+.code-workspace
