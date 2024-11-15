@@ -1,0 +1,11 @@
+.MainTest {
+    margin-top: 80px;
+    padding: 20px;
+    width: 80%;
+    margin: 0 auto;
+}
+
+.tabulator {
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}

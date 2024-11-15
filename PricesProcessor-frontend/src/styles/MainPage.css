@@ -1,0 +1,34 @@
+.generate-button {
+    padding: 5px 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    margin-left: 10px;
+}
+
+    .generate-button:hover {
+        background-color: #0056b3;
+    }
+
+.download-button {
+    padding: 5px 15px;
+    background-color: grey;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: not-allowed;
+    margin-left: 10px;
+}
+
+    .download-button.active {
+        background-color: #28a745;
+        cursor: pointer;
+    }
+
+.csv-info {
+    margin-top: 10px;
+    font-size: 0.9rem;
+    color: #333;
+}

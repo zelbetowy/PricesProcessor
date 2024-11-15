@@ -7,11 +7,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import pl.matelcode.foundation.domain.BaseEntity;
 import pl.matelcode.symbol.domain.Symbol;
-import pl.matelcode.symbol.domain.SymbolMainMarket;
-import pl.matelcode.symbol.domain.SymbolType;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.time.LocalDateTime;
 
 
@@ -20,12 +17,12 @@ import java.time.LocalDateTime;
 @Getter
 @Setter
 @Entity
-public class Prices extends BaseEntity {
+public class Price extends BaseEntity {
 
 
     @ManyToOne
     @JoinColumn(name = "symbol_id", nullable = false)
-    private String symbol;
+    private Symbol symbol;
 
     @Column(name = "timestamp", nullable = false)
     private LocalDateTime timestamp;

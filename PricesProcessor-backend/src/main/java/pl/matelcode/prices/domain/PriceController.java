@@ -7,10 +7,10 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/prices")
-public class PricesController {
+public class PriceController {
 
     @Autowired
-    private PricesRepository priceRepository;
+    private PriceRepository priceRepository;
 
     @PostMapping("/add")
     public Price addPrice(@RequestBody Price price) {
