@@ -1,0 +1,43 @@
+﻿.HomePage {
+    align-items: center;
+    background-color: #e0e0e0;
+    text-align: left;
+    padding: 2rem;
+    margin: 0 auto;
+    background-color: #f0f0f0;
+}
+
+.panel {
+    margin: 0 auto; /* Centers the home page within the parent */
+    padding: 3rem; /* You can adjust this as needed */
+    text-align: left; /* Center text alignment */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background-color: #fff;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    margin: 2rem 0;
+}
+
+.Button1 {
+    display: block; /* Ensures the button behaves like a block element */
+
+    width: 400px; /* Szerokoœæ przycisku */
+    height: 100px; /* Wysokoœæ przycisku */
+
+    cursor: pointer; /* Zmiana kursora na wskaŸnik */
+    text-align: center; /* Wyœrodkowanie tekstu */
+
+    font-size: 1.2rem; /* Increases font size */
+    font-weight: bold; /* Makes the text bold */
+    color: white; /* Kolor tekstu */
+
+    margin: 20px auto; /* Centers the button with top and bottom margin */
+    padding: 10px 20px; /* Adds space inside the button */
+    border: 5px solid #007BFF;
+    border-radius: 10px; /* Rounds the corners */
+    cursor: pointer; /* Changes the cursor to pointer on hover */
+}

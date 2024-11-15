@@ -1,0 +1,20 @@
+# Ustawienie automatycznej konwersji zakończeń linii dla plików tekstowych
+* text=auto
+
+# pliki z wymuszonym LF (Unix/Linux)
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# pliki z wymuszonym CRLF (Windows)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Pliki binarne - bez konwersji zakończeń linii
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.zip binary
+*.jar binary
