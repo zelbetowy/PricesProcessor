@@ -2,10 +2,13 @@ package pl.matelcode;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.ConfigurableApplicationContext;
-import pl.matelcode.AppStarter.AppStarter;
 
 @SpringBootApplication(scanBasePackages = {"pl.matelcode"})
+@EntityScan(basePackages = "pl.matelcode.domains")
+@EnableCaching
 public class App {
 
 	public static void main(String[] args) throws InterruptedException {
@@ -15,7 +18,6 @@ public class App {
 //		AppStarter starter = run.getBean(AppStarter.class);
 //		starter.start();
 	}
-
 }
 
 
